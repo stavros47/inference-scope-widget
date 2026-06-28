@@ -1,0 +1,306 @@
+#!/bin/bash
+
+set -u
+
+PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+TITLE_PREFIX="LLM"
+
+json_escape() {
+  python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'
+}
+
+trim() {
+  local s="${1:-}"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
+short_model_name() {
+  local raw="${1:-unknown}"
+  local name="$raw"
+  name="$(basename "$name")"
+  name="${name%.gguf}"
+  name="${name%.bin}"
+  name="${name%.safetensors}"
+  name="${name#models--}"
+  name="${name//--//}"
+  printf '%s' "$name"
+}
+
+compact_topbar_model() {
+  local raw="${1:-unknown}"
+  local ctx="${2:-}"
+  local name q
+
+  name="$(short_model_name "$raw")"
+
+  if [[ "$name" =~ ^Qwen([0-9]+\.?[0-9]*)-([0-9]+B.*)$ ]]; then
+    name="Qwen${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
+  fi
+
+  q="$(printf '%s' "$name" | sed -n 's/.*\(Q[0-9]_K_[A-Z]\|Q[0-9]_0\|BF16\|F16\|FP16\).*/\1/p' | head -n 1)"
+  [ -n "$q" ] && name="${name%% $q*} ${q}"
+  name="${name//-GGUF/}"
+  name="${name//GGUF/}"
+  name="$(printf '%s' "$name" | sed 's/[[:space:]]\+/ /g; s/^ //; s/ $//')"
+
+  if [[ -n "$ctx" && "$ctx" =~ ^[0-9]+$ ]]; then
+    if [ "$ctx" -ge 1000 ]; then
+      ctx="$((ctx / 1000))k"
+    fi
+    name="${name} c${ctx}"
+  fi
+
+  printf '%s' "$name"
+}
+
+human_rss_gb() {
+  local rss_kb="${1:-0}"
+  awk -v kb="$rss_kb" 'BEGIN { printf "%.1f", kb / 1024 / 1024 }'
+}
+
+get_swap_used() {
+  local out
+  out="$(sysctl vm.swapusage 2>/dev/null || sysctl -n vm.swapusage 2>/dev/null || true)"
+  if [[ "$out" =~ used\ =\ ([^[:space:]]+) ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  else
+    printf 'unknown'
+  fi
+}
+
+get_memory_pressure_label() {
+  local out score
+  out="$(memory_pressure 2>/dev/null || true)"
+  if [[ "$out" =~ System-wide\ memory\ free\ percentage:\ *([0-9]+)%? ]]; then
+    score="${BASH_REMATCH[1]}"
+    if (( score >= 40 )); then
+      printf 'normal'
+    elif (( score >= 20 )); then
+      printf 'elevated'
+    else
+      printf 'high'
+    fi
+    return
+  fi
+  printf 'unknown'
+}
+
+pressure_symbol() {
+  case "${1:-unknown}" in
+    normal) printf 'ok' ;;
+    elevated) printf 'warn' ;;
+    high) printf 'high' ;;
+    *) printf 'unknown' ;;
+  esac
+}
+
+get_vm_summary() {
+  local pagesize free_pages purgeable_pages active_pages wired_pages compressed_pages
+  local total_used_gb wired_gb compressed_gb free_gb
+  pagesize="$(pagesize 2>/dev/null || printf '16384')"
+  free_pages="$(vm_stat 2>/dev/null | awk '/Pages free/ {gsub("\\.","",$3); print $3}')"
+  purgeable_pages="$(vm_stat 2>/dev/null | awk '/Pages purgeable/ {gsub("\\.","",$3); print $3}')"
+  active_pages="$(vm_stat 2>/dev/null | awk '/Pages active/ {gsub("\\.","",$3); print $3}')"
+  wired_pages="$(vm_stat 2>/dev/null | awk '/Pages wired down/ {gsub("\\.","",$4); print $4}')"
+  compressed_pages="$(vm_stat 2>/dev/null | awk '/Pages occupied by compressor/ {gsub("\\.","",$5); print $5}')"
+
+  free_pages="${free_pages:-0}"
+  purgeable_pages="${purgeable_pages:-0}"
+  active_pages="${active_pages:-0}"
+  wired_pages="${wired_pages:-0}"
+  compressed_pages="${compressed_pages:-0}"
+
+  total_used_gb="$(awk -v p="$pagesize" -v a="$active_pages" -v w="$wired_pages" -v c="$compressed_pages" \
+    'BEGIN { printf "%.1f", ((a+w+c)*p)/(1024*1024*1024) }')"
+  wired_gb="$(awk -v p="$pagesize" -v w="$wired_pages" 'BEGIN { printf "%.1f", (w*p)/(1024*1024*1024) }')"
+  compressed_gb="$(awk -v p="$pagesize" -v c="$compressed_pages" 'BEGIN { printf "%.1f", (c*p)/(1024*1024*1024) }')"
+  free_gb="$(awk -v p="$pagesize" -v f="$free_pages" -v g="$purgeable_pages" 'BEGIN { printf "%.1f", ((f+g)*p)/(1024*1024*1024) }')"
+
+  printf '%s|%s|%s|%s' "$total_used_gb" "$wired_gb" "$compressed_gb" "$free_gb"
+}
+
+extract_flag_value() {
+  local cmd="${1:-}"
+  local flag="${2:-}"
+  printf '%s' "$cmd" | sed -n "s/.*${flag}[= ]\\([^ ]*\\).*/\\1/p" | head -n 1
+}
+
+extract_model_hint() {
+  local cmd="${1:-}"
+  local model path base
+
+  model="$(printf '%s' "$cmd" | sed -n 's/.*--model[= ]"\{0,1\}\([^" ]*[^" ]\)"\{0,1\}.*/\1/p' | head -n 1)"
+  if [ -n "$model" ]; then
+    path="$model"
+    base="$(short_model_name "$path")"
+    printf '%s|%s' "$base" "$path"
+    return
+  fi
+
+  model="$(printf '%s' "$cmd" | sed -n 's/.*ollama run \([^ ]*\).*/\1/p' | head -n 1)"
+  if [ -n "$model" ]; then
+    printf '%s|%s' "$model" "$model"
+    return
+  fi
+
+  model="$(printf '%s' "$cmd" | sed -n 's/.*vllm serve \([^ ]*\).*/\1/p' | head -n 1)"
+  if [ -n "$model" ]; then
+    base="$(short_model_name "$model")"
+    printf '%s|%s' "$base" "$model"
+    return
+  fi
+
+  if [[ "$cmd" == *"ollama"* ]]; then
+    printf 'ollama-daemon|ollama-daemon'
+    return
+  fi
+
+  printf 'unknown|unknown'
+}
+
+extract_runtime() {
+  local cmd="${1:-}"
+  if [[ "$cmd" == *"llama-server"* ]]; then
+    printf 'llama.cpp'
+  elif [[ "$cmd" == *"llama_cpp.server"* ]]; then
+    printf 'llama.cpp(py)'
+  elif [[ "$cmd" == *"ollama"* ]]; then
+    printf 'ollama'
+  elif [[ "$cmd" == *"vllm serve"* ]]; then
+    printf 'vllm'
+  else
+    printf 'unknown'
+  fi
+}
+
+get_pid_ports() {
+  local pid="${1:-}"
+  lsof -Pan -p "$pid" -iTCP -sTCP:LISTEN 2>/dev/null | awk 'NR>1 {sub(/^.*:/, "", $9); print $9}' | paste -sd',' -
+}
+
+collect_processes() {
+  ps -axo pid=,pcpu=,rss=,command= 2>/dev/null | awk '
+    !/awk/ && (/llama-server/ || /python3? -m llama_cpp\.server/ || /ollama/ || /vllm serve/) {
+      print
+    }' | sort -k2,2nr
+}
+
+ollama_loaded_models() {
+  if ! lsof -iTCP:11434 -sTCP:LISTEN -n -P >/dev/null 2>&1; then
+    return
+  fi
+  local body
+  body="$(curl -s --max-time 1 http://127.0.0.1:11434/api/ps 2>/dev/null || true)"
+  [ -z "$body" ] && return
+  printf '%s' "$body" | tr '{},[]' '\n' | sed -n 's/.*"name":"\([^"]*\)".*/\1/p' | sed '/^[[:space:]]*$/d'
+}
+
+json_string() {
+  printf '%s' "${1:-}" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'
+}
+
+main() {
+  local swap pressure pressure_short vm_summary used_gb wired_gb compressed_gb free_gb
+  local proc_lines count first_line first_cpu first_rss first_cmd first_model_pair first_model_name first_ctx
+
+  swap="$(get_swap_used)"
+  pressure="$(get_memory_pressure_label)"
+  pressure_short="$(pressure_symbol "$pressure")"
+  vm_summary="$(get_vm_summary)"
+  used_gb="${vm_summary%%|*}"
+  wired_gb="$(printf '%s' "$vm_summary" | cut -d'|' -f2)"
+  compressed_gb="$(printf '%s' "$vm_summary" | cut -d'|' -f3)"
+  free_gb="$(printf '%s' "$vm_summary" | cut -d'|' -f4)"
+
+  proc_lines="$(collect_processes || true)"
+  count="$(printf '%s\n' "$proc_lines" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')"
+
+  printf '{'
+  printf '"host":{'
+  printf '"memoryPressure":%s,' "$(json_string "$pressure")"
+  printf '"memoryPressureShort":%s,' "$(json_string "$pressure_short")"
+  printf '"memoryUsedGb":%s,' "$(json_string "$used_gb")"
+  printf '"wiredGb":%s,' "$(json_string "$wired_gb")"
+  printf '"compressedGb":%s,' "$(json_string "$compressed_gb")"
+  printf '"freeApproxGb":%s,' "$(json_string "$free_gb")"
+  printf '"swapUsed":%s' "$(json_string "$swap")"
+  printf '},'
+
+  printf '"runtimes":['
+  local first=1
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    local pid cpu rss cmd runtime model_pair model_name model_path host port ctx ngl flash ports loaded compact
+    pid="$(trim "$(printf '%s' "$line" | awk '{print $1}')")"
+    cpu="$(trim "$(printf '%s' "$line" | awk '{print $2}')")"
+    rss="$(trim "$(printf '%s' "$line" | awk '{print $3}')")"
+    cmd="$(printf '%s' "$line" | sed -E 's/^[[:space:]]*[0-9]+[[:space:]]+[0-9.]+[[:space:]]+[0-9]+[[:space:]]+//')"
+    runtime="$(extract_runtime "$cmd")"
+    model_pair="$(extract_model_hint "$cmd")"
+    model_name="${model_pair%%|*}"
+    model_path="${model_pair#*|}"
+    host="$(extract_flag_value "$cmd" '--host')"
+    port="$(extract_flag_value "$cmd" '--port')"
+    ctx="$(extract_flag_value "$cmd" '-c')"
+    [ -z "$ctx" ] && ctx="$(extract_flag_value "$cmd" '--ctx-size')"
+    ngl="$(extract_flag_value "$cmd" '-ngl')"
+    [ -z "$ngl" ] && ngl="$(extract_flag_value "$cmd" '--n-gpu-layers')"
+    flash="$(extract_flag_value "$cmd" '--flash-attn')"
+    ports="$(get_pid_ports "$pid")"
+    loaded=""
+    [ "$runtime" = "ollama" ] && loaded="$(ollama_loaded_models | paste -sd',' -)"
+    compact="$(compact_topbar_model "$model_name" "$ctx")"
+
+    [ "$first" -eq 0 ] && printf ','
+    first=0
+    printf '{'
+    printf '"pid":%s,' "$(json_string "$pid")"
+    printf '"cpuPercent":%s,' "$(json_string "$cpu")"
+    printf '"rssGb":%s,' "$(json_string "$(human_rss_gb "$rss")")"
+    printf '"runtime":%s,' "$(json_string "$runtime")"
+    printf '"modelName":%s,' "$(json_string "$model_name")"
+    printf '"modelPath":%s,' "$(json_string "$model_path")"
+    printf '"compactName":%s,' "$(json_string "$compact")"
+    printf '"hostBind":%s,' "$(json_string "$host")"
+    printf '"port":%s,' "$(json_string "$port")"
+    printf '"context":%s,' "$(json_string "$ctx")"
+    printf '"gpuLayers":%s,' "$(json_string "$ngl")"
+    printf '"flashAttention":%s,' "$(json_string "$flash")"
+    printf '"listeningPorts":%s,' "$(json_string "$ports")"
+    printf '"ollamaLoadedModels":%s,' "$(json_string "$loaded")"
+    printf '"rawCommand":%s' "$(json_string "$cmd")"
+    printf '}'
+  done <<< "$proc_lines"
+  printf '],'
+
+  if [ "$count" -gt 0 ]; then
+    first_line="$(printf '%s\n' "$proc_lines" | sed -n '1p')"
+    first_cpu="$(trim "$(printf '%s' "$first_line" | awk '{print $2}')")"
+    first_rss="$(trim "$(printf '%s' "$first_line" | awk '{print $3}')")"
+    first_cmd="$(printf '%s' "$first_line" | sed -E 's/^[[:space:]]*[0-9]+[[:space:]]+[0-9.]+[[:space:]]+[0-9]+[[:space:]]+//')"
+    first_model_pair="$(extract_model_hint "$first_cmd")"
+    first_model_name="${first_model_pair%%|*}"
+    first_ctx="$(extract_flag_value "$first_cmd" '-c')"
+    [ -z "$first_ctx" ] && first_ctx="$(extract_flag_value "$first_cmd" '--ctx-size')"
+    first_model_name="$(compact_topbar_model "$first_model_name" "$first_ctx")"
+    printf '"summary":{'
+    printf '"title":%s,' "$(json_string "${first_model_name} | $(human_rss_gb "${first_rss:-0}") | sw ${swap} | ${pressure_short}")"
+    printf '"activeModel":%s,' "$(json_string "$first_model_name")"
+    printf '"activeCpuPercent":%s,' "$(json_string "$first_cpu")"
+    printf '"activeRssGb":%s' "$(json_string "$(human_rss_gb "${first_rss:-0}")")"
+    printf '}'
+  else
+    printf '"summary":{'
+    printf '"title":%s,' "$(json_string "${TITLE_PREFIX} down | mem ${used_gb}G | sw ${swap} | ${pressure_short}")"
+    printf '"activeModel":%s,' "$(json_string "none")"
+    printf '"activeCpuPercent":%s,' "$(json_string "0")"
+    printf '"activeRssGb":%s' "$(json_string "0.0")"
+    printf '}'
+  fi
+
+  printf '}'
+}
+
+main
