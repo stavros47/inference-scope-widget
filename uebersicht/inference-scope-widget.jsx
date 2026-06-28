@@ -317,7 +317,7 @@ export const render = ({ output }) => {
   } catch (err) {
     return (
       <div className="errorCard">
-        <div className="errorTitle">LLM Runtime Monitor</div>
+        <div className="errorTitle">Inference Scope</div>
         <div className="errorBody">Widget parse error</div>
         <div className="errorDetail">{String(err)}</div>
       </div>
@@ -338,7 +338,7 @@ export const render = ({ output }) => {
         <div className="gridGlow" />
         <div className="inner idleInner">
           <div className="eyebrow">
-            <span>LLM Runtime Monitor</span>
+            <span>Inference Scope</span>
             <span>{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
           </div>
 
@@ -373,7 +373,7 @@ export const render = ({ output }) => {
       <div className="gridGlow" />
       <div className="inner">
         <div className="eyebrow">
-          <span>LLM Runtime Monitor</span>
+          <span>Inference Scope</span>
           <span>{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
         </div>
 

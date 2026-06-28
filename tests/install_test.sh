@@ -3,7 +3,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/llm-runtime-monitor-widget-test.XXXXXX")"
+TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/inference-scope-widget-test.XXXXXX")"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
 assert_file() {
@@ -31,7 +31,7 @@ run_install() {
 test_copy_mode() {
   local home_dir="$TEST_ROOT/copy-home"
   local feed_path="$home_dir/.local/bin/llm-runtime-monitor-feed"
-  local widget_path="$home_dir/Library/Application Support/Übersicht/widgets/llm-runtime-monitor/llm-runtime-monitor.jsx"
+  local widget_path="$home_dir/Library/Application Support/Übersicht/widgets/inference-scope-widget/inference-scope-widget.jsx"
 
   mkdir -p "$home_dir"
   run_install "$home_dir"
@@ -54,7 +54,7 @@ test_copy_mode() {
 test_link_mode() {
   local home_dir="$TEST_ROOT/link-home"
   local feed_path="$home_dir/.local/bin/llm-runtime-monitor-feed"
-  local widget_path="$home_dir/Library/Application Support/Übersicht/widgets/llm-runtime-monitor/llm-runtime-monitor.jsx"
+  local widget_path="$home_dir/Library/Application Support/Übersicht/widgets/inference-scope-widget/inference-scope-widget.jsx"
 
   mkdir -p "$home_dir"
   run_install "$home_dir" --link
@@ -66,7 +66,7 @@ test_link_mode() {
     echo "feed symlink target mismatch" >&2
     exit 1
   }
-  [[ "$(readlink "$widget_path")" == "$REPO_ROOT/uebersicht/llm-runtime-monitor.jsx" ]] || {
+  [[ "$(readlink "$widget_path")" == "$REPO_ROOT/uebersicht/inference-scope-widget.jsx" ]] || {
     echo "widget symlink target mismatch" >&2
     exit 1
   }

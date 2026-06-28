@@ -1,4 +1,4 @@
-# LLM Runtime Monitor Widget
+# Inference Scope Widget
 
 A macOS desktop monitor for local LLM runtimes, packaged as a shareable
 [Übersicht](https://tracesof.net/uebersicht/) widget.
@@ -26,7 +26,7 @@ desktop panel.
 ## Repo layout
 
 - `bin/llm-runtime-monitor-feed`: shell collector that emits widget JSON
-- `uebersicht/llm-runtime-monitor.jsx`: Übersicht widget UI
+- `uebersicht/inference-scope-widget.jsx`: Übersicht widget UI
 - `install.sh`: supported installer for copy or link mode installs
 
 ## Prerequisites
@@ -53,7 +53,7 @@ your shell will use:
 This installs:
 
 - `~/.local/bin/llm-runtime-monitor-feed`
-- `~/Library/Application Support/Übersicht/widgets/llm-runtime-monitor/llm-runtime-monitor.jsx`
+- `~/Library/Application Support/Übersicht/widgets/inference-scope-widget/inference-scope-widget.jsx`
 
 Rerunning `./install.sh` is safe and refreshes those installed files in place.
 
