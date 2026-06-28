@@ -328,8 +328,13 @@ export const render = ({ output }) => {
   const runtimes = data.runtimes || [];
   const primary = runtimes[0] || null;
   const summary = data.summary || {};
-  const pressureKey = host.memoryPressureShort || 'unknown';
-  const statusColor = colors[pressureKey] || colors.unknown;
+  const freeStateKey = host.memoryFreeStateShort || 'unknown';
+  const statusColor = colors[freeStateKey] || colors.unknown;
+  const freeStateLabel = host.memoryFreeState || 'unknown';
+  const freePercentLabel =
+    host.memoryFreePercent && host.memoryFreePercent !== 'unknown'
+      ? `${host.memoryFreePercent}%`
+      : '—';
   const isIdle = !primary;
 
   if (isIdle) {
@@ -352,13 +357,14 @@ export const render = ({ output }) => {
                   boxShadow: `0 0 14px ${statusColor}`,
                 }}
               />
-              {pressureKey}
+              {freeStateLabel}
             </div>
           </div>
 
           <div className="idleMeta">
             <div className="idleChip">Used {host.memoryUsedGb ? `${host.memoryUsedGb}G` : '—'}</div>
             <div className="idleChip">Free {host.freeApproxGb ? `${host.freeApproxGb}G` : '—'}</div>
+            <div className="idleChip">Free % {freePercentLabel}</div>
             <div className="idleChip">Swap {valueOrDash(host.swapUsed)}</div>
           </div>
 
@@ -387,14 +393,15 @@ export const render = ({ output }) => {
                 boxShadow: `0 0 14px ${statusColor}`,
               }}
             />
-            {pressureKey}
+            {freeStateLabel}
           </div>
         </div>
 
         <div className="metrics">
           <Metric label="Model RAM" value={primary ? `${primary.rssGb}G` : '—'} />
           <Metric label="Swap" value={host.swapUsed} />
-          <Metric label="Pressure" value={pressureKey} />
+          <Metric label="Free State" value={freeStateLabel} />
+          <Metric label="Free %" value={freePercentLabel} />
           <Metric label="Comp" value={host.compressedGb ? `${host.compressedGb}G` : '—'} />
         </div>
 
@@ -422,6 +429,8 @@ export const render = ({ output }) => {
             <KV label="Compressed" value={host.compressedGb ? `${host.compressedGb}G` : '—'} />
             <KV label="Free approx" value={host.freeApproxGb ? `${host.freeApproxGb}G` : '—'} />
             <KV label="Wired" value={host.wiredGb ? `${host.wiredGb}G` : '—'} />
+            <KV label="Free state" value={freeStateLabel} />
+            <KV label="Free percent" value={freePercentLabel} />
           </div>
         </div>
 

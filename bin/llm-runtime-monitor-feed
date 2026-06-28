@@ -70,28 +70,35 @@ get_swap_used() {
   fi
 }
 
-get_memory_pressure_label() {
-  local out score
-  out="$(memory_pressure 2>/dev/null || true)"
+parse_memory_free_percentage() {
+  local out="${1:-}"
   if [[ "$out" =~ System-wide\ memory\ free\ percentage:\ *([0-9]+)%? ]]; then
-    score="${BASH_REMATCH[1]}"
-    if (( score >= 40 )); then
-      printf 'normal'
-    elif (( score >= 20 )); then
-      printf 'elevated'
-    else
-      printf 'high'
-    fi
+    printf '%s' "${BASH_REMATCH[1]}"
     return
   fi
   printf 'unknown'
 }
 
-pressure_symbol() {
+classify_memory_free_state() {
   case "${1:-unknown}" in
-    normal) printf 'ok' ;;
-    elevated) printf 'warn' ;;
-    high) printf 'high' ;;
+    unknown) printf 'unknown' ;;
+    *)
+      if (( $1 >= 40 )); then
+        printf 'roomy'
+      elif (( $1 >= 20 )); then
+        printf 'tight'
+      else
+        printf 'critical'
+      fi
+      ;;
+  esac
+}
+
+free_state_symbol() {
+  case "${1:-unknown}" in
+    roomy) printf 'ok' ;;
+    tight) printf 'warn' ;;
+    critical) printf 'high' ;;
     *) printf 'unknown' ;;
   esac
 }
@@ -202,12 +209,14 @@ json_string() {
 }
 
 main() {
-  local swap pressure pressure_short vm_summary used_gb wired_gb compressed_gb free_gb
+  local swap free_percent free_state free_state_short vm_summary used_gb wired_gb compressed_gb free_gb memory_pressure_out
   local proc_lines count first_line first_cpu first_rss first_cmd first_model_pair first_model_name first_ctx
 
   swap="$(get_swap_used)"
-  pressure="$(get_memory_pressure_label)"
-  pressure_short="$(pressure_symbol "$pressure")"
+  memory_pressure_out="$(memory_pressure 2>/dev/null || true)"
+  free_percent="$(parse_memory_free_percentage "$memory_pressure_out")"
+  free_state="$(classify_memory_free_state "$free_percent")"
+  free_state_short="$(free_state_symbol "$free_state")"
   vm_summary="$(get_vm_summary)"
   used_gb="${vm_summary%%|*}"
   wired_gb="$(printf '%s' "$vm_summary" | cut -d'|' -f2)"
@@ -219,8 +228,9 @@ main() {
 
   printf '{'
   printf '"host":{'
-  printf '"memoryPressure":%s,' "$(json_string "$pressure")"
-  printf '"memoryPressureShort":%s,' "$(json_string "$pressure_short")"
+  printf '"memoryFreePercent":%s,' "$(json_string "$free_percent")"
+  printf '"memoryFreeState":%s,' "$(json_string "$free_state")"
+  printf '"memoryFreeStateShort":%s,' "$(json_string "$free_state_short")"
   printf '"memoryUsedGb":%s,' "$(json_string "$used_gb")"
   printf '"wiredGb":%s,' "$(json_string "$wired_gb")"
   printf '"compressedGb":%s,' "$(json_string "$compressed_gb")"
@@ -286,14 +296,14 @@ main() {
     [ -z "$first_ctx" ] && first_ctx="$(extract_flag_value "$first_cmd" '--ctx-size')"
     first_model_name="$(compact_topbar_model "$first_model_name" "$first_ctx")"
     printf '"summary":{'
-    printf '"title":%s,' "$(json_string "${first_model_name} | $(human_rss_gb "${first_rss:-0}") | sw ${swap} | ${pressure_short}")"
+    printf '"title":%s,' "$(json_string "${first_model_name} | $(human_rss_gb "${first_rss:-0}") | sw ${swap} | free ${free_percent}%")"
     printf '"activeModel":%s,' "$(json_string "$first_model_name")"
     printf '"activeCpuPercent":%s,' "$(json_string "$first_cpu")"
     printf '"activeRssGb":%s' "$(json_string "$(human_rss_gb "${first_rss:-0}")")"
     printf '}'
   else
     printf '"summary":{'
-    printf '"title":%s,' "$(json_string "${TITLE_PREFIX} down | mem ${used_gb}G | sw ${swap} | ${pressure_short}")"
+    printf '"title":%s,' "$(json_string "${TITLE_PREFIX} down | mem ${used_gb}G | sw ${swap} | free ${free_percent}%")"
     printf '"activeModel":%s,' "$(json_string "none")"
     printf '"activeCpuPercent":%s,' "$(json_string "0")"
     printf '"activeRssGb":%s' "$(json_string "0.0")"
@@ -303,4 +313,6 @@ main() {
   printf '}'
 }
 
-main
+if [[ "${LLM_RUNTIME_MONITOR_LIB:-0}" != "1" ]]; then
+  main
+fi

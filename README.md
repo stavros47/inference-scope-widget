@@ -4,7 +4,7 @@ A macOS desktop monitor for local LLM runtimes, packaged as a shareable
 [Übersicht](https://tracesof.net/uebersicht/) widget.
 
 It watches running processes on your machine and surfaces the active local model
-server, its memory footprint, and host memory pressure in a compact translucent
+server, its memory footprint, and host memory state in a compact translucent
 desktop panel.
 
 ## Supported runtimes
@@ -20,7 +20,7 @@ desktop panel.
 - model RSS in gigabytes
 - CPU usage and listening ports
 - parsed runtime flags such as context size, GPU layers, flash attention, host, and port
-- host memory pressure, swap, wired memory, compressed memory, and approximate free memory
+- sampled system-wide free-memory percentage, a coarse free-memory state, swap, wired memory, compressed memory, and approximate free memory
 - additional runtime cards when more than one local server is active
 
 ## Repo layout
