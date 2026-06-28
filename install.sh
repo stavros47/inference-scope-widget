@@ -32,7 +32,7 @@ case "${1:-}" in
 esac
 
 FEED_SOURCE="$REPO_ROOT/bin/llm-runtime-monitor-feed"
-WIDGET_SOURCE="$REPO_ROOT/uebersicht/inference-scope-widget.jsx"
+WIDGET_SOURCE="$REPO_ROOT/widget/inference-scope-widget.jsx"
 FEED_DEST="$HOME/.local/bin/llm-runtime-monitor-feed"
 WIDGET_DIR="$HOME/Library/Application Support/Übersicht/widgets/inference-scope-widget"
 WIDGET_DEST="$WIDGET_DIR/inference-scope-widget.jsx"

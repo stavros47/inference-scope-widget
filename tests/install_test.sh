@@ -66,7 +66,7 @@ test_link_mode() {
     echo "feed symlink target mismatch" >&2
     exit 1
   }
-  [[ "$(readlink "$widget_path")" == "$REPO_ROOT/uebersicht/inference-scope-widget.jsx" ]] || {
+  [[ "$(readlink "$widget_path")" == "$REPO_ROOT/widget/inference-scope-widget.jsx" ]] || {
     echo "widget symlink target mismatch" >&2
     exit 1
   }

@@ -26,7 +26,7 @@ desktop panel.
 ## Repo layout
 
 - `bin/llm-runtime-monitor-feed`: shell collector that emits widget JSON
-- `uebersicht/inference-scope-widget.jsx`: Übersicht widget UI
+- `widget/inference-scope-widget.jsx`: Übersicht widget UI
 - `install.sh`: supported installer for copy or link mode installs
 
 ## Prerequisites
